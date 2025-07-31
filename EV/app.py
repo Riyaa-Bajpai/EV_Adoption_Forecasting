@@ -5,20 +5,19 @@ import joblib
 from datetime import datetime
 import matplotlib.pyplot as plt
 
-# Page config
-st.set_page_config(page_title="EV Forecast", layout="wide")
+# Page setup
+st.set_page_config(page_title="EV Forecast Dashboard", layout="wide")
 
-# === Load Model ===
+# === Load pre-trained forecasting model ===
 model = joblib.load('forecasting_ev_model.pkl')
 
-# === Enhanced Styling ===
+# === Custom Styling ===
 st.markdown("""
     <style>
         .stApp {
             background-image: url('background.jpg');
             background-size: cover;
             background-position: center;
-            background-repeat: no-repeat;
             background-attachment: fixed;
         }
 
@@ -28,12 +27,12 @@ st.markdown("""
 
         .block-container {
             padding: 2rem;
-            background-color: rgba(0, 0, 0, 0.55);
-            border-radius: 12px;
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
         }
 
         .title {
-            font-size: 48px;
+            font-size: 44px;
             font-weight: bold;
             color: #ffffff;
             text-align: center;
@@ -41,42 +40,39 @@ st.markdown("""
         }
 
         .subtitle {
-            font-size: 24px;
-            font-weight: 600;
+            font-size: 22px;
+            font-weight: 500;
             text-align: center;
             color: #f0f0f0;
-            margin-bottom: 30px;
+            margin-bottom: 25px;
         }
 
         .instruction {
-            font-size: 20px;
+            font-size: 18px;
             color: #f0f0f0;
             padding-bottom: 10px;
         }
 
         .custom-success {
-            font-size: 18px;
+            font-size: 16px;
             color: #00ffb3;
-        }
-
-        .custom-warning {
-            font-size: 18px;
-            color: #ffae42;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# Title and Intro
-st.markdown("<div class='title'>🔮 EV Adoption Forecaster - Washington State</div>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>Welcome to the Electric Vehicle (EV) Forecast Dashboard</div>", unsafe_allow_html=True)
+# === Title Section ===
+st.markdown("<div class='title'>🔋 EV Forecast Dashboard - Washington State</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Visualizing Current Trends and Predicting the Future of Electric Vehicles</div>", unsafe_allow_html=True)
 
-# Image
+# Header Image
 st.image("ev.jpg", use_container_width=True)
 
-st.markdown("<div class='instruction'>Select a county to forecast EV adoption trends over the next 3 years.</div>", unsafe_allow_html=True)
+# === Instruction ===
+st.markdown("<div class='instruction'>Choose a Washington county to explore historical trends and forecast EV adoption over the next 3 years.</div>", unsafe_allow_html=True)
 
-# === Load data ===
+# === Load and Cache Data ===
 @st.cache_data
+
 def load_data():
     df = pd.read_csv("preprocessed_ev_data.csv")
     df['Date'] = pd.to_datetime(df['Date'])
@@ -84,79 +80,81 @@ def load_data():
 
 df = load_data()
 
-# === County dropdown ===
-county_list = sorted(df['County'].dropna().unique().tolist())
-county = st.selectbox("Select a County", county_list)
+# === County Dropdown ===
+counties = sorted(df['County'].dropna().unique().tolist())
+county = st.selectbox("Select a County", counties)
 
+# Handle edge case
 if county not in df['County'].unique():
     st.warning(f"County '{county}' not found in dataset.")
     st.stop()
 
-county_df = df[df['County'] == county].sort_values("Date")
-county_code = county_df['county_encoded'].iloc[0]
+# === Filter by selected county ===
+data = df[df['County'] == county].sort_values("Date")
+code = data['county_encoded'].iloc[0]
 
-# === Forecasting ===
-historical_ev = list(county_df['Electric Vehicle (EV) Total'].values[-6:])
-cumulative_ev = list(np.cumsum(historical_ev))
-months_since_start = county_df['months_since_start'].max()
-latest_date = county_df['Date'].max()
+# === Historical setup ===
+hist = list(data['Electric Vehicle (EV) Total'].values[-6:])
+cumulative = list(np.cumsum(hist))
+months = data['months_since_start'].max()
+last_date = data['Date'].max()
 
-future_rows = []
-forecast_horizon = 36
+# === Forecast Generation ===
+preds = []
+H = 36  # forecast horizon (months)
 
-for i in range(1, forecast_horizon + 1):
-    forecast_date = latest_date + pd.DateOffset(months=i)
-    months_since_start += 1
-    lag1, lag2, lag3 = historical_ev[-1], historical_ev[-2], historical_ev[-3]
-    roll_mean = np.mean([lag1, lag2, lag3])
-    pct_change_1 = (lag1 - lag2) / lag2 if lag2 != 0 else 0
-    pct_change_3 = (lag1 - lag3) / lag3 if lag3 != 0 else 0
-    recent_cumulative = cumulative_ev[-6:]
-    ev_growth_slope = np.polyfit(range(len(recent_cumulative)), recent_cumulative, 1)[0] if len(recent_cumulative) == 6 else 0
+for i in range(1, H + 1):
+    next_date = last_date + pd.DateOffset(months=i)
+    months += 1
+    l1, l2, l3 = hist[-1], hist[-2], hist[-3]
+    roll = np.mean([l1, l2, l3])
+    pct1 = (l1 - l2) / l2 if l2 != 0 else 0
+    pct3 = (l1 - l3) / l3 if l3 != 0 else 0
+    slope = np.polyfit(range(6), cumulative[-6:], 1)[0] if len(cumulative) == 6 else 0
 
-    new_row = {
-        'months_since_start': months_since_start,
-        'county_encoded': county_code,
-        'ev_total_lag1': lag1,
-        'ev_total_lag2': lag2,
-        'ev_total_lag3': lag3,
-        'ev_total_roll_mean_3': roll_mean,
-        'ev_total_pct_change_1': pct_change_1,
-        'ev_total_pct_change_3': pct_change_3,
-        'ev_growth_slope': ev_growth_slope
-    }
+    features = pd.DataFrame([{
+        'months_since_start': months,
+        'county_encoded': code,
+        'ev_total_lag1': l1,
+        'ev_total_lag2': l2,
+        'ev_total_lag3': l3,
+        'ev_total_roll_mean_3': roll,
+        'ev_total_pct_change_1': pct1,
+        'ev_total_pct_change_3': pct3,
+        'ev_growth_slope': slope
+    }])
 
-    pred = model.predict(pd.DataFrame([new_row]))[0]
-    future_rows.append({"Date": forecast_date, "Predicted EV Total": round(pred)})
+    prediction = model.predict(features)[0]
+    preds.append({"Date": next_date, "Predicted EV Total": round(prediction)})
 
-    historical_ev.append(pred)
-    if len(historical_ev) > 6:
-        historical_ev.pop(0)
+    hist.append(prediction)
+    if len(hist) > 6:
+        hist.pop(0)
+    cumulative.append(cumulative[-1] + prediction)
+    if len(cumulative) > 6:
+        cumulative.pop(0)
 
-    cumulative_ev.append(cumulative_ev[-1] + pred)
-    if len(cumulative_ev) > 6:
-        cumulative_ev.pop(0)
+# === Merge Historical + Forecast ===
+hist_df = data[['Date', 'Electric Vehicle (EV) Total']].copy()
+hist_df['Source'] = 'Historical'
+hist_df['Cumulative EV'] = hist_df['Electric Vehicle (EV) Total'].cumsum()
 
-# === Combine Historical + Forecast for Cumulative Plot ===
-historical_cum = county_df[['Date', 'Electric Vehicle (EV) Total']].copy()
-historical_cum['Source'] = 'Historical'
-historical_cum['Cumulative EV'] = historical_cum['Electric Vehicle (EV) Total'].cumsum()
+future_df = pd.DataFrame(preds)
+future_df['Source'] = 'Forecast'
+future_df['Cumulative EV'] = future_df['Predicted EV Total'].cumsum() + hist_df['Cumulative EV'].iloc[-1]
 
-forecast_df = pd.DataFrame(future_rows)
-forecast_df['Source'] = 'Forecast'
-forecast_df['Cumulative EV'] = forecast_df['Predicted EV Total'].cumsum() + historical_cum['Cumulative EV'].iloc[-1]
-
-combined = pd.concat([
-    historical_cum[['Date', 'Cumulative EV', 'Source']],
-    forecast_df[['Date', 'Cumulative EV', 'Source']]
+merged = pd.concat([
+    hist_df[['Date', 'Cumulative EV', 'Source']],
+    future_df[['Date', 'Cumulative EV', 'Source']]
 ], ignore_index=True)
 
-# === Plot Cumulative Graph ===
-st.subheader(f"📊 Cumulative EV Forecast for {county} County")
+# === Plot Forecast ===
+st.subheader(f"📈 Cumulative Forecast for {county} County")
 fig, ax = plt.subplots(figsize=(12, 6))
-for label, data in combined.groupby('Source'):
-    ax.plot(data['Date'], data['Cumulative EV'], label=label, marker='o')
-ax.set_title(f"Cumulative EV Trend - {county} (3 Years Forecast)", fontsize=14, color='white')
+for label, segment in merged.groupby('Source'):
+    ax.plot(segment['Date'], segment['Cumulative EV'], label=label, marker='o')
+
+ax.set_title(f"EV Growth Trend in {county} County", fontsize=14, color='white')
 ax.set_xlabel("Date", color='white')
 ax.set_ylabel("Cumulative EV Count", color='white')
 ax.grid(True, alpha=0.3)
@@ -166,117 +164,104 @@ ax.tick_params(colors='white')
 ax.legend()
 st.pyplot(fig)
 
-# === Compare historical and forecasted cumulative EVs ===
-historical_total = historical_cum['Cumulative EV'].iloc[-1]
-forecasted_total = forecast_df['Cumulative EV'].iloc[-1]
+# === Growth Summary ===
+h_base = hist_df['Cumulative EV'].iloc[-1]
+f_total = future_df['Cumulative EV'].iloc[-1]
 
-if historical_total > 0:
-    forecast_growth_pct = ((forecasted_total - historical_total) / historical_total) * 100
-    trend = "increase 📈" if forecast_growth_pct > 0 else "decrease 📉"
-    st.success(f"Based on the graph, EV adoption in **{county}** is expected to show a **{trend} of {forecast_growth_pct:.2f}%** over the next 3 years.")
+if h_base > 0:
+    growth = ((f_total - h_base) / h_base) * 100
+    label = "increase 📈" if growth > 0 else "decrease 📉"
+    st.success(f"EV registrations in **{county}** are projected to see a **{label} of {growth:.2f}%** in the next 3 years.")
 else:
-    st.warning("Historical EV total is zero, so percentage forecast change can't be computed.")
+    st.warning("Not enough historical data for this county.")
 
-
-# === New: Compare up to 3 counties ===
+# === Comparison Section ===
 st.markdown("---")
-st.header("Compare EV Adoption Trends for up to 3 Counties")
+st.header("Compare Up to 3 Counties")
+selections = st.multiselect("Choose counties to compare", counties, max_selections=3)
 
-multi_counties = st.multiselect("Select up to 3 counties to compare", county_list, max_selections=3)
+if selections:
+    series = []
+    for name in selections:
+        d = df[df['County'] == name].sort_values("Date")
+        code = d['county_encoded'].iloc[0]
+        h = list(d['Electric Vehicle (EV) Total'].values[-6:])
+        c = list(np.cumsum(h))
+        m = d['months_since_start'].max()
+        last = d['Date'].max()
 
-if multi_counties:
-    comparison_data = []
+        preds = []
+        for i in range(1, H + 1):
+            m += 1
+            future = last + pd.DateOffset(months=i)
+            l1, l2, l3 = h[-1], h[-2], h[-3]
+            roll = np.mean([l1, l2, l3])
+            pct1 = (l1 - l2) / l2 if l2 != 0 else 0
+            pct3 = (l1 - l3) / l3 if l3 != 0 else 0
+            slope = np.polyfit(range(6), c[-6:], 1)[0] if len(c) == 6 else 0
 
-    for cty in multi_counties:
-        cty_df = df[df['County'] == cty].sort_values("Date")
-        cty_code = cty_df['county_encoded'].iloc[0]
+            row = pd.DataFrame([{
+                'months_since_start': m,
+                'county_encoded': code,
+                'ev_total_lag1': l1,
+                'ev_total_lag2': l2,
+                'ev_total_lag3': l3,
+                'ev_total_roll_mean_3': roll,
+                'ev_total_pct_change_1': pct1,
+                'ev_total_pct_change_3': pct3,
+                'ev_growth_slope': slope
+            }])
 
-        hist_ev = list(cty_df['Electric Vehicle (EV) Total'].values[-6:])
-        cum_ev = list(np.cumsum(hist_ev))
-        months_since = cty_df['months_since_start'].max()
-        last_date = cty_df['Date'].max()
+            pred = model.predict(row)[0]
+            preds.append({"Date": future, "Predicted EV Total": round(pred)})
+            h.append(pred)
+            if len(h) > 6: h.pop(0)
+            c.append(c[-1] + pred)
+            if len(c) > 6: c.pop(0)
 
-        future_rows_cty = []
-        for i in range(1, forecast_horizon + 1):
-            forecast_date = last_date + pd.DateOffset(months=i)
-            months_since += 1
-            lag1, lag2, lag3 = hist_ev[-1], hist_ev[-2], hist_ev[-3]
-            roll_mean = np.mean([lag1, lag2, lag3])
-            pct_change_1 = (lag1 - lag2) / lag2 if lag2 != 0 else 0
-            pct_change_3 = (lag1 - lag3) / lag3 if lag3 != 0 else 0
-            recent_cum = cum_ev[-6:]
-            ev_slope = np.polyfit(range(len(recent_cum)), recent_cum, 1)[0] if len(recent_cum) == 6 else 0
+        base = d[['Date', 'Electric Vehicle (EV) Total']].copy()
+        base['Cumulative EV'] = base['Electric Vehicle (EV) Total'].cumsum()
 
-            new_row = {
-                'months_since_start': months_since,
-                'county_encoded': cty_code,
-                'ev_total_lag1': lag1,
-                'ev_total_lag2': lag2,
-                'ev_total_lag3': lag3,
-                'ev_total_roll_mean_3': roll_mean,
-                'ev_total_pct_change_1': pct_change_1,
-                'ev_total_pct_change_3': pct_change_3,
-                'ev_growth_slope': ev_slope
-            }
-            pred = model.predict(pd.DataFrame([new_row]))[0]
-            future_rows_cty.append({"Date": forecast_date, "Predicted EV Total": round(pred)})
+        fc = pd.DataFrame(preds)
+        fc['Cumulative EV'] = fc['Predicted EV Total'].cumsum() + base['Cumulative EV'].iloc[-1]
 
-            hist_ev.append(pred)
-            if len(hist_ev) > 6:
-                hist_ev.pop(0)
-
-            cum_ev.append(cum_ev[-1] + pred)
-            if len(cum_ev) > 6:
-                cum_ev.pop(0)
-
-        hist_cum = cty_df[['Date', 'Electric Vehicle (EV) Total']].copy()
-        hist_cum['Cumulative EV'] = hist_cum['Electric Vehicle (EV) Total'].cumsum()
-
-        fc_df = pd.DataFrame(future_rows_cty)
-        fc_df['Cumulative EV'] = fc_df['Predicted EV Total'].cumsum() + hist_cum['Cumulative EV'].iloc[-1]
-
-        combined_cty = pd.concat([
-            hist_cum[['Date', 'Cumulative EV']],
-            fc_df[['Date', 'Cumulative EV']]
+        final = pd.concat([
+            base[['Date', 'Cumulative EV']],
+            fc[['Date', 'Cumulative EV']]
         ], ignore_index=True)
+        final['County'] = name
+        series.append(final)
 
-        combined_cty['County'] = cty
-        comparison_data.append(combined_cty)
-
-    # Combine all counties data for plotting
-    comp_df = pd.concat(comparison_data, ignore_index=True)
+    plot_df = pd.concat(series)
 
     # Plot
-    st.subheader("📈 Comparison of Cumulative EV Adoption Trends")
+    st.subheader("📊 Comparative Forecast View")
     fig, ax = plt.subplots(figsize=(14, 7))
-    for cty, group in comp_df.groupby('County'):
-        ax.plot(group['Date'], group['Cumulative EV'], marker='o', label=cty)
-    ax.set_title("EV Adoption Trends: Historical + 3-Year Forecast", fontsize=16, color='white')
+    for name, grp in plot_df.groupby("County"):
+        ax.plot(grp['Date'], grp['Cumulative EV'], marker='o', label=name)
+    ax.set_title("County-wise EV Growth Forecast", fontsize=16, color='white')
     ax.set_xlabel("Date", color='white')
-    ax.set_ylabel("Cumulative EV Count", color='white')
+    ax.set_ylabel("Cumulative EVs", color='white')
     ax.grid(True, alpha=0.3)
     ax.set_facecolor("#1c1c1c")
     fig.patch.set_facecolor('#1c1c1c')
     ax.tick_params(colors='white')
-    ax.legend(title="County")
+    ax.legend()
     st.pyplot(fig)
-    
-    # Display % growth for selected counties ===
-    growth_summaries = []
-    for cty in multi_counties:
-        cty_df = comp_df[comp_df['County'] == cty].reset_index(drop=True)
-        historical_total = cty_df['Cumulative EV'].iloc[len(cty_df) - forecast_horizon - 1]
-        forecasted_total = cty_df['Cumulative EV'].iloc[-1]
 
-        if historical_total > 0:
-            growth_pct = ((forecasted_total - historical_total) / historical_total) * 100
-            growth_summaries.append(f"{cty}: {growth_pct:.2f}%")
+    # Summary Stats
+    summary = []
+    for name in selections:
+        sub = plot_df[plot_df['County'] == name].reset_index(drop=True)
+        past = sub['Cumulative EV'].iloc[len(sub) - H - 1]
+        future = sub['Cumulative EV'].iloc[-1]
+        if past > 0:
+            percent = ((future - past) / past) * 100
+            summary.append(f"{name}: {percent:.2f}%")
         else:
-            growth_summaries.append(f"{cty}: N/A (no historical data)")
+            summary.append(f"{name}: N/A")
+    st.success("Forecasted growth over 3 years → " + " | ".join(summary))
 
-    # Join all in one sentence and show with st.success
-    growth_sentence = " | ".join(growth_summaries)
-    st.success(f"Forecasted EV adoption growth over next 3 years — {growth_sentence}")
-
+# === Footer ===
 st.markdown("---")
-st.markdown("<div class='custom-success'>Prepared by <strong>Riya Bajpai </strong>for the <strong>AICTE Internship Cycle 2 by S4F</strong></div>", unsafe_allow_html=True)
+st.markdown("<div class='custom-success'>Prepared by <strong>Riya Bajpai</strong> for the <strong>AICTE Internship Cycle 2 by S4F</strong></div>", unsafe_allow_html=True)
