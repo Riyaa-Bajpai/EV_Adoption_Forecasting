@@ -7,6 +7,3 @@ scikit-learn
 
 # For web app (if using Streamlit)
 streamlit
-
-# Windows-only package 
-pywin32==306  
